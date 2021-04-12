@@ -1,0 +1,675 @@
+---
+title: "Non-Normal and Missing Data"
+author: "Joshua F. Wiley"
+date: "`r Sys.Date()`"
+output: 
+  powerpoint_presentation:
+    reference_doc: VirtualSLEEP21_PresentationTemplate.pptx
+    slide_level: 2
+---
+
+# Introduction and Notes
+
+## Outline
+
+* Non-Normal Data
+    + Examples
+	+ Why it is a problem
+	+ Bootstrapping as a solution
+	+ Bootstrapping for longitudinal data 
+* Missing Data
+    + Examples
+	+ Why it is a problem
+	+ Multiple Imputation (MI) as a solution
+	+ MI for longitudinal data
+
+## Software
+
+I will use `R` to demonstrate. If you are new to `R`, 
+you can see this guide with steps and information:
+http://joshuawiley.com/MonashHonoursStatistics/IntroR.html
+
+You can download the raw `R` markdown code for this presentation here:
+https://jwiley.github.io/MonashHonoursStatistics/MissingData.rmd
+
+## Packages
+
+We will use several `R` packages today. You load packages 
+with the `library()` function. If a package is not yet 
+installed, you can install it using the 
+`install.packages()` function.
+
+
+```{r setup}
+options(digits = 3) ## reduce decimals in output
+
+## some people have reported also needing the zip pkg
+# install.packages("zip") before the other packages install correctly
+library(data.table)       ## data management
+library(boot)             ## bootstrapping
+library(parallel)         ## parallel processing
+library(JWileymisc)       ## tools
+library(lme4)             ## longitudinal models
+library(multilevelTools)  ## convenient functions for multilevel models
+library(mice)             ## multiple imputation 
+library(VIM)              ## visualize missing data
+library(ggplot2)          ## general visualization
+
+```
+
+# Dealing with Non-Normal Data
+
+## Non-Normal Data Examples
+
+* There are many kinds of non-normal variables
+
+* Some variables are not continuous, such as whether someone has OSA or not (yes/no), which is binary
+
+* Sleep also has many variables that have a continuous but non-normal distribution, such as Sleep Onset Latency (SOL)
+
+```{r} 
+data(aces_daily) ## load a daily sleep study dataset
+aces_daily <- as.data.table(aces_daily)
+aces_daily[, sqrtSOL := sqrt(SOLs)]
+```
+
+## SOL Distribution
+
+```{r}
+plot(testDistribution(aces_daily$SOLs), varlab = "SOL") ## plot distribution
+```
+
+## SOL Distribution - Square Root
+
+```{r}
+plot(testDistribution(sqrt(aces_daily$sqrtSOL)), varlab = "sqrt SOL")
+```
+
+## Why Non-Normal Data is a Problem
+
+Normal inferential statistics (i.e., confidence intervals, standard errors, p-values) 
+are wrong if the model assumes data are normally distributed and they are not.
+
+```{r, results = 'asis'}
+
+duse <- aces_daily[!duplicated(UserID)]
+m <- lm(sqrtSOL ~ Age, data = duse)
+
+``` 
+
+## Linear Regression Results
+
+```{r, results = 'asis'}
+knitr::kable( APAStyler(modelTest(m))[, -3] )
+```
+
+## Bootstrap Introduction
+
+* Parametric models make assumptions about the sampling distribution of parameters.
+* Bootstrapping empirically generates the sampling distribution of parameters by repeated sampling
+* Bootstrapping, at its most basic, involves sampling, with replacement, from a dataset, refitting the model, storing the parameter(s), and then repeating many times to build up an empirical distribution.
+
+## Bootstrap Conceptual Example
+
+```{r, echo = FALSE, results = "asis"}
+
+set.seed(1234)
+ex <- data.table(ID = 1:5)
+ex <- cbind(ex, replicate(4, sample(1:5, replace = TRUE)))
+knitr::kable(ex)
+
+```
+
+## Bootstrap Introduction
+
+* Because bootstrapping involves empirically building up the sampling distribution for parameters, the more bootstrap samples, the more precise the estimates
+* The empirical distribution can then be summarized to calculate confidence intervals, the standard deviation of the bootstrap distribution is the standard error of the parameter
+* If possible, 10,000 + bootstrap samples ideal. Takes computational, but not researcher time
+
+## Bootstrapping Code Example
+ 
+* First we setup a local cluster using 10 CPU cores
+
+* We export the saved model, `m`, and datasets, `duse` and `aces_daily`
+
+* Use the `boot()` function to bootstrap the model and save the coefficients, with 20,000 bootstraps
+
+```{r}
+
+cl <- makeCluster(10)
+clusterExport(cl, c("m", "duse", "aces_daily"))
+
+bootres <- boot(duse, function(x, i) {
+  coef(update(m, data = duse[i, ]))
+}, R = 20000, parallel = "snow", ncpus = 10, cl = cl)
+
+``` 
+
+## Bootstrapping Intercept Results 1
+
+```{r}
+
+plot(bootres, index = 1)
+
+``` 
+
+## Bootstrapping Intercept Results 2
+
+```{r}
+
+coef(m)[1]
+boot.ci(bootres, index = 1, type = "perc")
+
+```
+
+## Bootstrapping Age Slope Results 1
+
+```{r}
+
+plot(bootres, index = 2)
+
+``` 
+
+## Bootstrapping Age Slope Results 2
+
+```{r}
+
+coef(m)[2]
+boot.ci(bootres, index = 2, type = "perc")
+
+```
+
+## Bootstrapping Longitudinal Data
+
+* Beyond linear regression, bootstrapping can also be applied to other models, such as multilevel models for longitudinal data.
+* Bootstrapping multilevel models for longitudinal data can take a variety of forms, but the basic idea is the same.
+    + Lai, M. H. (2020). Bootstrap confidence intervals for multilevel standardized effect size. _Multivariate Behavioral Research_, 1-21.
+
+```{r} 
+
+mlm <- lmer(sqrtSOL ~ STRESS + (1 | UserID),
+            data = aces_daily, REML = FALSE)
+
+```
+
+## Longitudinal Results
+
+```{r, results = 'asis'}
+
+knitr::kable( APAStyler(modelTest(mlm))[, -3] )
+
+```
+
+## Longitudinal Bootstrapped Results
+
+```{r, results = 'asis'}
+
+knitr::kable(
+  APAStyler(modelTest(mlm, method = "boot", nsim = 1000,
+  parallel = "snow", ncpus = 10, cl = cl))[, -3] )
+
+```
+
+## Further Reading
+
+* Efron, B., & Tibshirani, R. J. (1994). An introduction to the bootstrap. CRC press.
+* Davison, A. C., & Hinkley, D. V. (1997). Bootstrap methods and their application (No. 1). Cambridge university press.
+* Goldstein, H. (2011). Bootstrapping in multilevel models. Handbook of advanced multilevel analysis, 163-171.
+* Van der Leeden, R., Meijer, E., & Busing, F. M. (2008). Resampling multilevel models. In Handbook of multilevel analysis (pp. 401-433). Springer, New York, NY.
+* Lai, M. H. (2020). Bootstrap confidence intervals for multilevel standardized effect size. _Multivariate Behavioral Research_, 1-21.
+
+## Simple Tutorials
+
+* https://towardsdatascience.com/a-practical-guide-to-bootstrap-with-r-examples-bd975ec6dcea
+* https://cran.r-project.org/doc/Rnews/Rnews_2002-3.pdf
+
+
+
+
+# Missing Data: Multiple Imputation
+
+## Missing Data Background
+
+* Missing data are very common, but also problematic
+  + Results from the non-missing data may be biased
+  + Missing data cause a loss of efficiency
+
+* The easiest approach to "address" missing data is to only analyze complete cases (i.e., list-wise deletion). This often leads to inefficiency (e.g., discarding data on X and Z because observation on variable Y are missing). Also, list wise deletion may bias results unless the data are missing completely at random (MCAR).
+
+## Missing data classifications
+
+- Missing completely at random (MCAR) when the missingness mechanism
+is completely independent of the estimate of our parameter(s) of
+interest.
+- Missing at random (MAR) when the missingness mechanism is
+*conditionally* independent of the estimate of our parameter(s) of
+interest
+- Missing not at random (MNAR) when the missingness mechanism is
+associated with the estimate of our parameter(s) of interest
+
+## Missing Data Background
+
+Our parameters may be anything, such as a mean, a standard deviation,
+a regression coefficient, etc. We will explore **multiple imputation
+(MI)** as one robust way to address missing data.
+
+
+## Multiple Imputation (MI) Theory
+
+Multiple imputation is one robust way to address missing data. It
+involves generate multiple, different datasets where in each one,
+different, plausible values are imputed for the missing data,
+resulting in each imputed dataset have "complete" data since missing
+data are filled in by predictions.
+
+## Multiple Imputation Steps
+
+The general process to generate multiply imputed using a robust
+approach: fully conditional specification (FCS) or multiple imputation
+through chained equations (mice) is:
+
+1. Start with a raw dataset with missing data
+2. Fill in the missing data values with **initial** estimates.
+*The first "fill in" estimates are generally fast and easy
+to generate (e.g., using median)
+3. For each variable that has missing data, build a prediction model
+from other variables.
+*often, all other variables in the dataset
+being imputed are used, e.g., in a GLM in the prediction model*
+4. Use the model to predict the missing data.
+5. Repeat steps 2 and 3 until the change from on iteration to another is small (indicating convergence)
+
+## Imputation Example
+
+These steps may be easier to understand with a concrete example. Here
+we simulate a small dataset with age and inflammation.
+
+```{r, echo = FALSE}
+set.seed(12345)
+x <- data.frame(Age = sort(round(runif(10, 30, 65))))
+x$Inflammation <-  rnorm(10, x$Age/10, sd = .2)
+x$Missing <- as.logical(rep(FALSE:TRUE, c(9, 1)))
+
+scatterp <- ggplot(x, aes(Age, Inflammation)) +
+    stat_smooth(method = "lm", formula = y ~ x, se=FALSE) +
+    geom_point(aes(colour = Missing, size = Missing)) +
+    theme_classic() + theme(legend.position = c(.8, .2))
+
+print(scatterp)
+
+## create a missing dataset
+y <- x
+y$Inflammation[y$Missing] <- NA
+
+```
+## Imputation Convergence Example
+
+```{r, echo = FALSE, fig.show = "animate", animation.hook="gifski", warning = FALSE, message = FALSE}
+
+## create an imputed dataset
+yimp <- y
+p <- vector("list", length = 10)
+imps <- vector("numeric", length = 10)
+
+for (i in 1:10) {
+  if (i == 1) {
+    imps[i] <- median(y$Inflammation, na.rm = TRUE)
+  } else if (i > 1) {
+    m <- lm(Inflammation ~ Age, data = yimp)
+    imps[i] <- fitted(m)[yimp$Missing]
+  }
+  yimp$Inflammation[yimp$Missing == TRUE] <- imps[i]
+  p[[i]] <- scatterp %+% yimp + ggtitle(sprintf("Iteration = %d", i))
+  if (i > 4) {
+    p[[i]] <- p[[i]] + coord_cartesian(xlim = c(55, 66), ylim = c(5.4, 7), expand=FALSE)
+  }
+  print(p[[i]])
+}
+
+```
+
+## Imputation Convergence Results
+
+We can print out the imputed values too and see how those change. This
+highlights how over iterations, there are big changes at first, and
+with more iterations the changes are smaller and smaller. This is what
+is meant by convergence where you converge to a final, stable value.
+
+```{r}
+
+print(imps, digits = 5)
+
+```
+
+## Multiple Imputation Background
+
+The final step in multiple imputation, is that rather than generating 
+a single best imputed value for missing values, we generate multiple 
+values, creating many different complete datasets, each with different 
+plausible values. Analyses are performed on each dataset, and then 
+the results of all the analyses are pooled or combined together,
+capturing uncertainty within each dataset (due to sampling variation)
+and uncertainty across datasets (due to missing data variation).
+
+## MI in `R`
+
+Before we can try MI in `R` we need to make a dataset with missing
+values. It is possible to do multilevel imputation, but it is more
+complicated and outside the scope of this workshop. Longitudinal imputation 
+if you have a few discrete time points can be done by using wide data,
+so that each row is independent.
+
+For the sake of example, we will take only complete data and then add 
+missing data ourselves. This allows us to compare different approaches 
+with the "truth" from the non-missing data.
+
+The code below is not important to understand. It just creates three
+datasets:
+
+1. The raw daily diary dataset we've worked with
+2. A complete case, between person dataset with no missing values.
+3. A between person dataset with missing values
+
+## MI in `R` Dataset Code
+
+```{r}
+
+## between person data, no missing
+davg <- na.omit(aces_daily[, .(
+  Female = factor(na.omit(Female)[1], levels = 0:1),
+  Age = na.omit(Age)[1],
+  STRESS = mean(STRESS, na.rm = TRUE),
+  PosAff = mean(PosAff, na.rm = TRUE),
+  NegAff = mean(NegAff, na.rm = TRUE)),
+  by = UserID])
+
+## create missing data
+davgmiss <- copy(davg)
+davgmiss[STRESS < 1, NegAff := NA]
+davgmiss[STRESS > 4, PosAff := NA]
+## random missingness on age and Female
+set.seed(1234)
+davgmiss[rbinom(.N, size = 1, prob = .1) == 1, Age := NA_real_]
+davgmiss[rbinom(.N, size = 1, prob = .05) == 1, Female := NA]
+
+## drop unneeded variables to make analysis easier
+davgmiss[, UserID := NULL]
+
+```
+
+## First Steps
+
+Before imputation, we should examine our data. The
+`VIM` package in `R` has helpful functions for this. 
+We start by looking at the amount missing on each variable and
+the patterns of missing data using the `aggr()` function. This shows
+us that just over half of cases have complete data on all
+variables.
+
+The left hand side of this missing data plot shows the
+proportion of missing data on each individual variable. Variables
+where the bars have no height are variables with no (or very nearly
+no) missing data. Variables with higher bars have a greater proportion
+of missing observations on that variable.
+The right hand side shows different patterns of missing data. Blue
+indicates present data. Red indicates missing data. 
+
+```{r}
+
+aggr(davgmiss, prop = TRUE, numbers = TRUE)
+
+```
+
+## First Steps
+
+A margin plot is an augmented scatter plot that in the margins shows
+the values on one variable when missing on the other along with a
+boxplot. This shows us that when negative affect is missing, stress
+scores are all low between 0 and 1. There are no missing stress scores
+so there is only one boxplot for negative affect.
+
+The margin plot starts with a scatter plot. Blue dots
+are observed data. Red dots are imputed data. 
+
+```{r}
+
+marginplot(davgmiss[,.(STRESS, NegAff)])
+
+```
+
+## First Steps
+
+We can test whether levels of one variable differ by missing on
+another variable. This is often done with simple analyses, like
+t-tests or chi-square tests.
+
+```{r}
+
+## does stress differ by missing on negative affect?
+t.test(STRESS ~ is.na(NegAff), data = davgmiss)
+
+## does sex differ by missing negative affect?
+chisq.test(davgmiss$Female, is.na(davgmiss$NegAff))
+
+```
+
+## MI in `R` 
+
+Conducting MI in `R` is relatively straight forward. A very
+flexible, robust approach is available using the `mice` package and
+the `mice()` function. You can control almost every aspect of the MI
+in `mice()` but you also can use defaults.
+
+`mice()` takes a dataset, the number of imputed datasets to generate,
+the number of iterations, the random seed (make it reproducible) and
+default imputation methods. The defaults are fine, but you can change
+default imputation methods. 
+
+## MI in `R`
+
+Below we ask for all GLMs as imputation methods
+
+1. "norm" which is linear regression for numeric data
+2. "logreg" which is logistic regression for factor data with 2 levels
+3. "polyreg" which is polytomous or multinomial regression for
+   unordered factor data with 3+ levels
+4. "polr" ordered logistic regression for factor data with 3+ ordered
+   levels
+
+`R` will do the steps discussed to then generate imputed datasets.
+We plot them to see if there is evidence of convergence. 
+We set the maximum iterations as 20.
+
+```{r}
+
+mi.1 <- mice(
+  davgmiss,
+  m = 5,   maxit = 20,
+  defaultMethod = c("norm", "logreg", "polyreg", "polr"),
+  seed = 1234, printFlag = FALSE)
+
+```
+
+## MI in `R` Convergence
+
+```{r}
+
+plot(mi.1, PosAff + NegAff + Female ~ .it | .ms)
+
+```
+
+## MI Diagnostics
+
+Diagnostic plots do not necessarily tell you
+whether the imputation is "right" or "wrong". They show in blue the
+observed density plots and in blue the observed data scatter
+plots. The red lines and points represent the distributions from the
+imputed data. 
+
+```{r}
+
+densityplot(mi.1, ~ PosAff + NegAff + Age)
+
+```
+
+## MI in `R` 
+
+Once you have created the imputed datasets, you can analyse
+them. Analyses must be repeated on each individual
+dataset. For models that are fitted with a formula interface, you can
+use the special `with()` function which works with multiply imputed
+datasets. It means that the analysis is automatically run on each
+imputed dataset separately. 
+To pool the results from the individual regressions, we use the
+`pool()` function.
+
+## MI Pooled Results in `R`
+
+The pooled output has several pieces:
+
+- **estimate**: the pooled, average regression coefficients;
+- **ubar**: the average variance (based on the squared standard errors)
+  associated with sampling variation, we called it $\bar{V}$;
+- **b**: the between imputation variance;
+- **t**: the total variance incorporating sampling variation, between
+  imputation variance, and simulation error;
+- **dfcom**: the degrees of freedom for the complete data analysis (i.e.,
+  if there had not been missing data);
+- **df**: the estimated residual degrees of freedom for the model, taking
+  into account missingness;
+- **riv**: the relative increase variance due to missing data;
+- **lambda** or $\lambda$: the proportion of total variance due to
+  missing data, that is: $\lambda = \frac{B + B/m}{T}$;
+- **fmi**: the fraction of missing information
+
+## MI Pooled Results in `R`
+
+```{r}
+
+mi.reg <- with(mi.1, lm(NegAff ~ PosAff + Age))
+
+mi.reg
+
+pool(mi.reg)
+
+```
+
+## MI Pooled Results in `R`
+
+We can also summarise the pooled results with confidence intervals
+using the `summary()` function on the pooled results.
+Finally, we can get a pooled $R^2$ value using the
+`pool.r.squared()` function on the analyses.
+
+The summary output includes standard regression
+output in this case.
+
+- **estimate**: the pooled, average regression coefficients;
+- **std.error**: the standard error of the estimates incorporating all
+  three sources of MI error, specifically: $se = \sqrt{T}$;
+- **statistic**: $\frac{estimate}{std.error}$;
+- **df**: the estimated degrees of freedom incorporating uncertainty due
+  to missing data, combined with the statistic to calculate p-values;
+- **p.value**: the p-value, the probability of obtaining the estimate or
+  larger in the sample given that the true population value was zero.
+- **2.5%**: the lower limit of the 95% confidence interval;
+- **97.5%**: the upper limit of the 95% confidence interval.
+
+## MI Pooled Results in `R`
+
+```{r}
+
+m.mireg <- summary(pool(mi.reg), conf.int=TRUE)
+print(m.mireg)
+
+pool.r.squared(mi.reg)
+
+```
+
+## MI in `R`
+
+In general, you can use any analysis you want with multiple
+imputation, replacing `lm()` with another function, including `glm()`
+and `lmer()`.
+
+Here is an example looking at a logistic regression (albeit a rather
+silly one) predicting Female from negative affect and age.
+We can select the coefficients and confidence intervals and
+exponentiate them to get the odds ratios.
+
+```{r}
+
+mi.reg2 <- with(mi.1, glm(Female ~ NegAff + Age, family = binomial()))
+
+m.mireg2 <- summary(pool(mi.reg2), conf.int=TRUE)
+print(m.mireg2)
+
+## odds ratios
+exp(m.mireg2[, c("estimate", "2.5 %", "97.5 %")])
+
+```
+
+## Multiple Imputation Comparison
+
+One thing that often is helpful is to compare results under different
+models or assumptions. Here we fit the same model in three ways:
+
+1. pooled from the multiple imputations that was already done,
+   labelled "MI Reg".
+2. based on the true, non-missing data, since we made the missing data
+ourselves and have the true data, labelled, "Truth".
+3. Complete case analysis using listwise deletion, labelled "CC".
+
+```{r, echo = FALSE}
+m.true <- lm(NegAff ~ PosAff + Age, data = davg)
+m.cc <- lm(NegAff ~ PosAff + Age, data = davgmiss)
+
+res.true <- as.data.table(cbind(coef(m.true), confint(m.true)))
+res.cc <- as.data.table(cbind(coef(m.cc), confint(m.cc)))
+res.mireg <- as.data.table(m.mireg[, c("estimate", "2.5 %", "97.5 %")])
+setnames(res.true, c("B", "LL", "UL"))
+setnames(res.cc, c("B", "LL", "UL"))
+setnames(res.mireg, c("B", "LL", "UL"))
+
+res.compare <- rbind(
+  cbind(Type = "Truth", Param = names(coef(m.true)), res.true),
+  cbind(Type = "CC", Param = names(coef(m.true)), res.cc),
+  cbind(Type = "MI Reg", Param = names(coef(m.true)), res.mireg))
+
+ggplot(res.compare, aes(factor(""),
+   y = B, ymin = LL, ymax = UL, colour = Type)) +
+  geom_pointrange(position = position_dodge(.4)) +
+  facet_wrap(~Param, scales = "free")
+
+```
+
+## Function Summary 
+
+* `aggr()` Create a plot of missingness by variable and patterns of mising data for an entire dataset 
+* `marginplot()` Create a scatter plot of the non missing data between two continuous variables with the margins showing where missing data are
+* `mice()` Main worker function for multiple imputation through chained equations in `R`. Takes a dataset, the number of imputations and number of iterations as a minimum.
+* `with()` Function used to run models with a multiply imputed dataset.
+* `pool()` Pool / aggregate results run on multiply imputed data.
+* `pool.r.squared()` Calculate pooled $R^2$ value (only for `lm()` models) in multiply imputed analyses.
+
+## Further Reading
+
+* https://stefvanbuuren.name/fimd/ (Van Buuren, S. (2018). Flexible imputation of missing data. CRC press.)
+* Van Buuren, S. & Groothuis-Oudshoorn, K. (2010). mice: Multivariate imputation by chained equations in R. Journal of statistical software, 1-68.
+* Schafer, J. L. (1999). Multiple imputation: a primer. Statistical methods in medical research, 8(1), 3-15.
+* Schafer, J. L., & Graham, J. W. (2002). Missing data: our view of the state of the art. Psychological methods, 7(2), 147.
+* Enders, C. K. (2010). Applied missing data analysis. Guilford press.
+
+## Simple Tutorials
+
+* https://amices.org/mice/index.html
+* https://datascienceplus.com/imputing-missing-data-with-r-mice-package/
+
+# Thanks
+
+* Questions?
+* Download all underlying codes here:
+  http://joshuawiley.com/APSS2021_MissingData/MissingData.rmd
+* See a more beautiful web version here: 
+  http://joshuawiley.com/MonashHonoursStatistics/MissingData.html
+  
