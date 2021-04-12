@@ -30,7 +30,8 @@ you can see this guide with steps and information:
 http://joshuawiley.com/MonashHonoursStatistics/IntroR.html
 
 You can download the raw `R` markdown code for this presentation here:
-https://jwiley.github.io/MonashHonoursStatistics/MissingData.rmd
+http://joshuawiley.com/APSS2021_MissingData/MissingData.rmd
+
 
 ## Packages
 
@@ -40,7 +41,7 @@ installed, you can install it using the
 `install.packages()` function.
 
 
-```{r setup}
+```{r setup, echo = TRUE, results = "hide"}
 options(digits = 3) ## reduce decimals in output
 
 ## some people have reported also needing the zip pkg
@@ -665,11 +666,11 @@ ggplot(res.compare, aes(factor(""),
 * https://amices.org/mice/index.html
 * https://datascienceplus.com/imputing-missing-data-with-r-mice-package/
 
-# Thanks
+## Thanks
 
 * Questions?
 * Download all underlying codes here:
   http://joshuawiley.com/APSS2021_MissingData/MissingData.rmd
-* See a more beautiful web version here: 
+* See a more beautiful web version with extra explanation and code here: 
   http://joshuawiley.com/MonashHonoursStatistics/MissingData.html
   
